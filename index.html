@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Heart</title>
+  <title>Dreamy Heart</title>
   <style>
     :root{
       --bg1:#0b1026;
@@ -37,7 +37,7 @@
       pointer-events:none;
     }
 
-    /* 爱心：居中，无遮挡 */
+    /* 爱心：居中无遮挡 + 梦幻呼吸光 */
     .heart{
       position:relative;
       z-index:1;
@@ -46,11 +46,11 @@
       transform: rotate(45deg);
       background: var(--heart);
       border-radius: 18px;
-      filter: drop-shadow(0 0 22px rgba(255, 80, 150, .25));
       cursor:pointer;
 
-      animation: heartbeat var(--cycle) infinite;
+      animation: heartbeat var(--cycle) infinite, glow 2.2s ease-in-out infinite;
       transform-origin: 50% 60%;
+      will-change: transform, filter;
     }
     .heart::before,
     .heart::after{
@@ -72,8 +72,12 @@
       34%  { transform: rotate(45deg) scale(1) translateY(0); }
       100% { transform: rotate(45deg) scale(1) translateY(0); }
     }
+    @keyframes glow{
+      0%,100% { filter: drop-shadow(0 0 18px rgba(255,122,168,.22)) drop-shadow(0 0 45px rgba(255,59,107,.10)); }
+      50%     { filter: drop-shadow(0 0 26px rgba(255,122,168,.30)) drop-shadow(0 0 70px rgba(255,59,107,.14)); }
+    }
 
-    /* 唯一提示：点一点（极简、轻） */
+    /* 唯一提示：点一点（更梦幻：轻微呼吸） */
     .tip{
       position:fixed;
       left:50%;
@@ -81,10 +85,15 @@
       transform:translateX(-50%);
       z-index:2;
       font-size:14px;
-      letter-spacing:.2em;
+      letter-spacing:.22em;
       color: rgba(255,255,255,.72);
       text-shadow: 0 6px 28px rgba(0,0,0,.35);
       pointer-events:none;
+      animation: tipBreath 1.8s ease-in-out infinite;
+    }
+    @keyframes tipBreath{
+      0%,100%{ opacity:.55; transform:translateX(-50%) translateY(0); }
+      50%    { opacity:.85; transform:translateX(-50%) translateY(-1px); }
     }
   </style>
 </head>
@@ -96,7 +105,7 @@
 
   <script>
     /***********************
-     *  Canvas 粒子系统（轻量防卡）
+     *  Dreamy Canvas FX（轻量 + 防卡）
      ***********************/
     const canvas = document.getElementById('fx');
     const ctx = canvas.getContext('2d', { alpha: true });
@@ -107,12 +116,15 @@
     function resize(){
       W = Math.floor(window.innerWidth);
       H = Math.floor(window.innerHeight);
-      DPR = Math.max(1, Math.min(2.0, window.devicePixelRatio || 1)); // 稍微压一下 DPR，省性能
+      DPR = Math.max(1, Math.min(2.0, window.devicePixelRatio || 1));
       canvas.width  = Math.floor(W * DPR);
       canvas.height = Math.floor(H * DPR);
       canvas.style.width = W + "px";
       canvas.style.height = H + "px";
       ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+
+      // resize 时彻底清一次，避免拖尾残留
+      ctx.clearRect(0, 0, W, H);
     }
     window.addEventListener('resize', resize, { passive: true });
     resize();
@@ -131,8 +143,11 @@
       return { cx: r.left + r.width/2, cy: r.top + r.height/2, r };
     }
 
-    // ✅ 粒子上限（防止狂点卡死）
-    const MAX_PARTICLES = 900;
+    function rand(a,b){ return a + Math.random()*(b-a); }
+    function clamp01(x){ return Math.max(0, Math.min(1, x)); }
+
+    // ✅ 粒子上限（更严格更稳）
+    const MAX_PARTICLES = 850;
 
     const particles = [];
     const palette = [
@@ -141,11 +156,8 @@
       "rgba(255,203,221,1)"
     ];
 
-    function rand(a,b){ return a + Math.random()*(b-a); }
-
-    // 预生成一个“迷你爱心路径”，避免每帧重复写 bezier（省性能）
+    // 迷你爱心 Path2D（省性能）
     const miniHeartPath = new Path2D();
-    // 基于单位尺寸 k=1 的形状（后面用 scale 放大/缩小）
     miniHeartPath.moveTo(0, 0.35);
     miniHeartPath.bezierCurveTo(0, 0, -0.55, 0, -0.55, 0.35);
     miniHeartPath.bezierCurveTo(-0.55, 0.75, 0, 0.95, 0, 1.2);
@@ -155,47 +167,106 @@
 
     function pushParticle(p){
       particles.push(p);
-      // 超过上限就丢弃最旧的，保证不卡
       if(particles.length > MAX_PARTICLES){
-        particles.splice(0, particles.length - MAX_PARTICLES);
+        particles.splice(0, particles.length - MAX_PARTICLES); // 丢旧的保新的
       }
     }
 
-    // ✅ 削弱粒子：数量更少、速度更慢、寿命更短、更淡
+    // 梦幻增强：背景 bokeh（很少、很慢、很淡）
+    const bokeh = [];
+    const BOKEH_N = 18;
+    function initBokeh(){
+      bokeh.length = 0;
+      for(let i=0;i<BOKEH_N;i++){
+        bokeh.push({
+          x: Math.random()*W,
+          y: Math.random()*H,
+          r: rand(18, 55),
+          a: rand(0.04, 0.10),
+          vx: rand(-6, 6)/60,
+          vy: rand(-4, 4)/60,
+          tw: Math.random()*Math.PI*2,
+        });
+      }
+    }
+    initBokeh();
+
+    // 粒子发射：更梦幻=更轻更柔（并带“预算缩放”）
     function spawnBurst(strength = 1){
+      const budget = clamp01((MAX_PARTICLES - particles.length) / MAX_PARTICLES);
+      // 粒子多了就自动少喷（防卡死）
+      const eff = strength * Math.max(0.25, budget);
+
       const { cx, cy, r } = getHeartCenter();
       const scale = (Math.min(r.width, r.height) / 40) * 1.05;
 
-      const count = Math.floor(22 * strength);   // ⬅️ 原来 70，砍到很轻
-      const jitter = 0.35;                       // ⬅️ 扰动更小
-      const speedMin = 70, speedMax = 160;       // ⬅️ 速度更慢
+      const count = Math.floor(18 * eff);          // 更少
+      const jitter = 0.30;
+      const speedMin = 55, speedMax = 130;         // 更慢更飘
+      const ttlMin = 0.55, ttlMax = 1.10;          // 稍长一点更“雾”
+      const gMin = 70, gMax = 160;                 // 更轻
 
       for(let i=0; i<count; i++){
         const t = Math.random() * Math.PI * 2;
-        const p = heartPoint(t);
+        const hp = heartPoint(t);
 
-        const px = cx + p.x * scale;
-        const py = cy - p.y * scale;
+        const px = cx + hp.x * scale;
+        const py = cy - hp.y * scale;
 
         let dx = px - cx, dy = py - cy;
         const len = Math.hypot(dx, dy) || 1;
         dx /= len; dy /= len;
 
-        const speed = rand(speedMin, speedMax) * strength;
+        const speed = rand(speedMin, speedMax) * eff;
 
         pushParticle({
-          x: px + rand(-1.5, 1.5),
-          y: py + rand(-1.5, 1.5),
+          x: px + rand(-1.2, 1.2),
+          y: py + rand(-1.2, 1.2),
           vx: (dx + rand(-jitter, jitter)) * speed / 60,
           vy: (dy + rand(-jitter, jitter)) * speed / 60,
-          g: rand(120, 220) / 60,               // ⬅️ 重力更小
-          drag: rand(0.988, 0.996),             // ⬅️ 更快衰减
+          g: rand(gMin, gMax) / 60,
+          drag: rand(0.990, 0.997),
           life: 0,
-          ttl: rand(0.45, 0.85) * (1.05/strength), // ⬅️ 更短寿命
-          size: rand(1.2, 2.4) * (1 + 0.15*strength),
+          ttl: rand(ttlMin, ttlMax),
+          size: rand(1.0, 2.3),
           rot: rand(0, Math.PI*2),
-          spin: rand(-3, 3),
+          spin: rand(-2.2, 2.2),
           color: palette[Math.floor(Math.random()*palette.length)],
+        });
+      }
+    }
+
+    // 小“星尘”点缀：每帧少量生成 1~2 粒（非常轻）
+    function spawnSparkle(){
+      const budget = clamp01((MAX_PARTICLES - particles.length) / MAX_PARTICLES);
+      if(budget < 0.15) return; // 粒子太多时不加星尘
+
+      const { cx, cy, r } = getHeartCenter();
+      const scale = (Math.min(r.width, r.height) / 40) * 1.05;
+      const n = (Math.random() < 0.6) ? 1 : 2;
+
+      for(let i=0;i<n;i++){
+        const t = Math.random() * Math.PI * 2;
+        const hp = heartPoint(t);
+        const px = cx + hp.x * scale;
+        const py = cy - hp.y * scale;
+
+        const speed = rand(25, 70);
+        const ang = rand(0, Math.PI*2);
+
+        pushParticle({
+          x: px + rand(-1, 1),
+          y: py + rand(-1, 1),
+          vx: Math.cos(ang) * speed / 60,
+          vy: Math.sin(ang) * speed / 60,
+          g: rand(25, 60) / 60,
+          drag: rand(0.992, 0.998),
+          life: 0,
+          ttl: rand(0.50, 0.85),
+          size: rand(0.8, 1.6),
+          rot: rand(0, Math.PI*2),
+          spin: rand(-1.8, 1.8),
+          color: "rgba(255,255,255,1)",
         });
       }
     }
@@ -217,12 +288,46 @@
       const dt = Math.min(0.033, (now - last) / 1000);
       last = now;
 
-      ctx.clearRect(0, 0, W, H);
+      // 🌫️ 梦幻拖尾：用半透明“雾层”擦除，而不是 clearRect
+      // alpha 越小拖尾越长（建议 0.10~0.18）
+      ctx.save();
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = "rgba(11,16,38,0.13)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.restore();
 
-      // 更轻的发光（防过曝 + 省性能）
+      // 背景 bokeh：淡淡漂浮
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 30;
+      ctx.shadowColor = "rgba(255,122,168,.18)";
+      for(const b of bokeh){
+        b.x += b.vx * 60 * dt;
+        b.y += b.vy * 60 * dt;
+        b.tw += 0.6 * dt;
+
+        // 边界循环
+        if(b.x < -80) b.x = W + 80;
+        if(b.x > W + 80) b.x = -80;
+        if(b.y < -80) b.y = H + 80;
+        if(b.y > H + 80) b.y = -80;
+
+        const a = b.a * (0.75 + 0.25 * Math.sin(b.tw));
+        ctx.globalAlpha = a;
+        ctx.fillStyle = "rgba(255,122,168,1)";
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      // 星尘点缀（非常轻）
+      if(Math.random() < 0.22) spawnSparkle();
+
+      // 粒子主体
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.shadowBlur = 14;
       ctx.shadowColor = "rgba(255,122,168,.22)";
 
       for(let i = particles.length - 1; i >= 0; i--){
@@ -239,12 +344,13 @@
         p.rot += p.spin * dt;
 
         const t = p.life / p.ttl;
-        const alpha = (1 - t) * 0.75; // ⬅️ 更淡
-
         if(t >= 1){
           particles.splice(i, 1);
           continue;
         }
+
+        // 更梦幻：前期亮，后期慢慢淡
+        const alpha = (1 - t) * (0.55 + 0.20*(1 - t));
 
         drawMiniHeart(p.x, p.y, p.size, p.rot, p.color, alpha);
       }
@@ -255,14 +361,13 @@
     requestAnimationFrame(tick);
 
     /***********************
-     *  心跳喷粒（更弱）
+     *  心跳喷粒（更柔）
      ***********************/
     const cycleMs = 1200;
     function startHeartBeats(){
       function loop(){
-        // ⬅️ 原来 1.0 + 0.65，改成更轻
-        spawnBurst(0.35);
-        setTimeout(() => spawnBurst(0.22), 200);
+        spawnBurst(0.28);
+        setTimeout(() => spawnBurst(0.18), 200);
         setTimeout(loop, cycleMs);
       }
       loop();
@@ -270,7 +375,7 @@
     startHeartBeats();
 
     /***********************
-     *  点击：轻喷 + 冷却（防狂点卡死）
+     *  点击：轻喷 + 冷却（防狂点）
      ***********************/
     const CLICK_COOLDOWN_MS = 220;
     let lastClick = 0;
@@ -278,12 +383,16 @@
     heartEl.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       const now = performance.now();
-      if(now - lastClick < CLICK_COOLDOWN_MS) return; // ⬅️ 冷却
+      if(now - lastClick < CLICK_COOLDOWN_MS) return;
       lastClick = now;
 
-      // 轻量点击效果（不再 bigBoom 连发）
-      spawnBurst(0.65);
+      spawnBurst(0.55);
     });
+
+    // 初始化 bokeh 在 resize 后更新
+    window.addEventListener('resize', () => initBokeh(), { passive:true });
+
+  })();
   </script>
 </body>
 </html>
